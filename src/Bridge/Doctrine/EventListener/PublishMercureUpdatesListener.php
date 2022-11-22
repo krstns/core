@@ -157,7 +157,8 @@ final class PublishMercureUpdatesListener
             return;
         }
 
-        $options = $this->resourceMetadataFactory->create($resourceClass)->getAttribute('mercure', false);
+        $resourceMetadata = $this->resourceMetadataFactory->create($resourceClass);
+        $options = $resourceMetadata->getAttribute('mercure', false);
 
         if (\is_string($options)) {
             if (null === $this->expressionLanguage) {
@@ -204,7 +205,7 @@ final class PublishMercureUpdatesListener
             $this->deletedObjects[(object) [
                 'id' => $this->iriConverter->getIriFromItem($object),
                 'iri' => $this->iriConverter->getIriFromItem($object, UrlGeneratorInterface::ABS_URL),
-                'type' => $resourceClass
+                'type' => $resourceMetadata->getShortName()
             ]] = $options;
 
             return;
