@@ -31,7 +31,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Mercure\HubRegistry;
 use Symfony\Component\Mercure\Update;
 use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 use Symfony\Component\Serializer\SerializerInterface;
+use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 
 /**
  * Publishes resources updates to the Mercure hub.
@@ -66,12 +68,13 @@ final class PublishMercureUpdatesListener
     private $formats;
     private $graphQlSubscriptionManager;
     private $graphQlMercureSubscriptionIriGenerator;
+    private $tokenStorage;
 
     /**
      * @param array<string, string[]|string> $formats
      * @param HubRegistry|callable           $hubRegistry
      */
-    public function __construct(ResourceClassResolverInterface $resourceClassResolver, IriConverterInterface $iriConverter, ResourceMetadataFactoryInterface $resourceMetadataFactory, SerializerInterface $serializer, array $formats, MessageBusInterface $messageBus = null, $hubRegistry = null, ?GraphQlSubscriptionManagerInterface $graphQlSubscriptionManager = null, ?GraphQlMercureSubscriptionIriGeneratorInterface $graphQlMercureSubscriptionIriGenerator = null, ExpressionLanguage $expressionLanguage = null)
+    public function __construct(ResourceClassResolverInterface $resourceClassResolver, IriConverterInterface $iriConverter, ResourceMetadataFactoryInterface $resourceMetadataFactory, SerializerInterface $serializer, array $formats, MessageBusInterface $messageBus = null, $hubRegistry = null, ?GraphQlSubscriptionManagerInterface $graphQlSubscriptionManager = null, ?GraphQlMercureSubscriptionIriGeneratorInterface $graphQlMercureSubscriptionIriGenerator = null, TokenStorageInterface $tokenStorage, ExpressionLanguage $expressionLanguage = null)
     {
         if (null === $messageBus && null === $hubRegistry) {
             throw new InvalidArgumentException('A message bus or a hub registry must be provided.');
@@ -87,6 +90,7 @@ final class PublishMercureUpdatesListener
         $this->expressionLanguage = $expressionLanguage ?? (class_exists(ExpressionLanguage::class) ? new ExpressionLanguage() : null);
         $this->graphQlSubscriptionManager = $graphQlSubscriptionManager;
         $this->graphQlMercureSubscriptionIriGenerator = $graphQlMercureSubscriptionIriGenerator;
+        $this->tokenStorage = $tokenStorage;
         $this->reset();
     }
 
@@ -219,19 +223,26 @@ final class PublishMercureUpdatesListener
      */
     private function publishUpdate($object, array $options, string $type): void
     {
+        if ((null !== $this->tokenStorage) && null !== $this->tokenStorage->getToken() && null !== $user = $this->tokenStorage->getToken()->getUser()) {
+            $updater = $user->getUserIdentifier();
+        } else {
+            $updater = null;
+        }
         if ($object instanceof \stdClass) {
             // By convention, if the object has been deleted, we send only its IRI.
             // This may change in the feature, because it's not JSON Merge Patch compliant,
             // and I'm not a fond of this approach.
             $iri = $options['topics'] ?? $object->iri;
             /** @var string $data */
-            $data = json_encode(['@id' => $object->id, '@type' => $object->type]);
+            $data = json_encode(['@id' => $object->id, '@type' => $object->type, '@updatedBy' => $updater]);
         } else {
             $resourceClass = $this->getObjectClass($object);
             $context = $options['normalization_context'] ?? $this->resourceMetadataFactory->create($resourceClass)->getAttribute('normalization_context', []);
-
             $iri = $options['topics'] ?? $this->iriConverter->getIriFromItem($object, UrlGeneratorInterface::ABS_URL);
             $data = $options['data'] ?? $this->serializer->serialize($object, key($this->formats), $context);
+            $dataTemp = json_decode($data);
+            $dataTemp->{"@updatedBy"} = $updater;
+            $data = json_encode($dataTemp);
         }
 
         $updates = array_merge([$this->buildUpdate($iri, $data, $options)], $this->getGraphQlSubscriptionUpdates($object, $options, $type));
