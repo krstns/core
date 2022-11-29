@@ -25,6 +25,7 @@ use ApiPlatform\Core\Metadata\Resource\Factory\ResourceMetadataFactoryInterface;
 use ApiPlatform\Core\Util\ResourceClassInfoTrait;
 use Doctrine\Common\EventArgs;
 use Doctrine\ODM\MongoDB\Event\OnFlushEventArgs as MongoDbOdmOnFlushEventArgs;
+use Doctrine\ORM\Event\LifecycleEventArgs;
 use Doctrine\ORM\Event\OnFlushEventArgs as OrmOnFlushEventArgs;
 use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -92,6 +93,14 @@ final class PublishMercureUpdatesListener
         $this->graphQlMercureSubscriptionIriGenerator = $graphQlMercureSubscriptionIriGenerator;
         $this->tokenStorage = $tokenStorage;
         $this->reset();
+    }
+
+    /**
+     * Collects soft deleted objects
+     */
+    public function preSoftDelete(LifecycleEventArgs $args){
+        $entity = $args->getEntity();
+        $this->storeObjectToPublish($entity, 'updatedObjects');
     }
 
     /**
